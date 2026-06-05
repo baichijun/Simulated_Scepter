@@ -10,6 +10,8 @@ import sqlite3
 from tool.GLOBAL import key_mouse_manager, factor
 from route import PATHS
 from simul import SimulatedUniverse
+from tool.simul.config import config
+from tool.simul.text_key import text_keys
 from tool.log import CUS_LOGGER, log_emitter
 from tool.public_ocr import load_actions, merge_text
 from tool.utils.Error import NoMatchError
@@ -23,6 +25,9 @@ from tool.window_recorder import WindowRecorder
 
 
 class IronBloodUniverse(SimulatedUniverse):
+    def require_team4_check(self):
+        return False
+
     def __init__(
             self):
         settings_path = PATHS["root"] + "\\config\\config\\settings.json"
@@ -33,6 +38,10 @@ class IronBloodUniverse(SimulatedUniverse):
             with open(settings_path, mode="r", encoding="UTF-8") as file:
                 self.opt = json.load(file)
         super().__init__(find=True,speed=False,consumable=False, slow=False,debug=self.opt.get("debug", True), nums=self.opt.get("max_run_time", 0))
+        self.fate = "毁灭"
+        self.my_fate = config.fates.index(self.fate)
+        self.tk = text_keys(self.my_fate)
+        CUS_LOGGER.info(f"寰宇蝗灾固定命途：{self.fate}")
         self.plane_floor = -1
         self.need_record = False
         self.default_json_path = "actions/insect.json"
@@ -339,8 +348,37 @@ class IronBloodUniverse(SimulatedUniverse):
             return
         else:
             self.update_floor(1)
+    def pre_start(self):
+        self.fail_count = 0
+        if not self.require_team4_check() or self.check("team4", 0.5797, 0.2389):
+            self.click_team_order()
+        key_mouse_manager.sleep(0.3)
+        key_mouse_manager.click(0.1635, 0.1056)
+        key_mouse_manager.wait()
+        key_mouse_manager.sleep(0.6)
+        self.select_fate()
+        CUS_LOGGER.info("备战流程已完成选角与毁灭命途选择")
+
     def select_fate(self):
-        self.click_text(text="毁灭",box=[1263, 1317, 791, 821])
+        self.fate = "毁灭"
+        fate_idx = config.fates.index(self.fate)
+        if self.click_text("毁灭", warning=False):
+            key_mouse_manager.sleep(0.3)
+            key_mouse_manager.wait()
+            CUS_LOGGER.info("通过全屏 OCR 选择毁灭命途")
+            return
+        img = self.get_small_interaction_img(x=0.4969, y=0.3750, mask="mask_fate", fresh=True)
+        res = self.ts.split_and_find(["毁灭"], img)
+        if res[1] >= 2:
+            key_mouse_manager.click(*self.calc_point((0.4969, 0.3750), res[0]))
+            key_mouse_manager.sleep(0.3)
+            key_mouse_manager.wait()
+            CUS_LOGGER.info("通过命途条 OCR 选择毁灭命途")
+            return
+        CUS_LOGGER.info(f"OCR 未命中，按固定位置选择第 {fate_idx + 1} 个命途：毁灭")
+        self.click_fate_by_index(fate_idx)
+        key_mouse_manager.sleep(0.3)
+        key_mouse_manager.wait()
     def select_head(self):
         self.click_text(text="击败该首领",box=[1108, 1385, 267, 290])
         self.click_text(text="确认选择",box=[1633, 1733, 961, 990])

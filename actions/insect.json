@@ -499,6 +499,17 @@
             }
         ]
     },{
+        "name": "选择命途",
+        "trigger":{
+            "text": "踏上的命途",
+            "box": [837, 1083, 155, 186],
+            "redundancy": 30
+        },
+        "actions":
+        [
+            "select_fate"
+        ]
+    },{
         "name": "确认命途",
         "trigger":{
             "text": "确认命途",
@@ -510,17 +521,6 @@
             {
                 "position": [1576, 982]
             }
-        ]
-    },{
-        "name": "选择命途",
-        "trigger":{
-            "text": "踏上的命途",
-            "box": [837, 1083, 155, 186],
-            "redundancy": 30
-        },
-        "actions":
-        [
-            "select_fate"
         ]
     },{
         "name": "开始游戏",

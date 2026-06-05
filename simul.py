@@ -514,16 +514,102 @@ class SimulatedUniverse(UniverseUtils):
             return
         else:
             self.update_floor(1)
+    def require_team4_check(self):
+        return True
+
+    def roster_grid_point(self, index):
+        dx = 0.9266 - 0.8552
+        dy = 0.8194 - 0.6741
+        i = index - 1
+        return (
+            0.9266 - dx * (i % 3),
+            0.8194 - dy * (i // 3),
+        )
+
+    def _pixel_to_click(self, px, py):
+        return 1 - px / self.xx, 1 - py / self.yy
+
+    def _near_click_point(self, a, b, eps=0.04):
+        return abs(a[0] - b[0]) < eps and abs(a[1] - b[1]) < eps
+
+    def find_starred_roster_points(self, max_count=4, threshold=0.82):
+        self.get_screen()
+        star = find_image_by_name("star")
+        if star is None:
+            return []
+        rx1, rx2 = int(0.70 * self.xx), int(0.98 * self.xx)
+        ry1, ry2 = int(0.50 * self.yy), int(0.92 * self.yy)
+        region = self.screen[ry1:ry2, rx1:rx2]
+        if region.size == 0:
+            return []
+        tw = max(1, int(self.scx * star.shape[1]))
+        th = max(1, int(self.scx * star.shape[0]))
+        template = cv.resize(star, (tw, th))
+        if template.shape[0] > region.shape[0] or template.shape[1] > region.shape[1]:
+            return []
+        result = cv.matchTemplate(region, template, cv.TM_CCOEFF_NORMED)
+        ys, xs = np.where(result >= threshold)
+        if xs.size == 0:
+            return []
+        matches = [(int(x), int(y), float(result[y, x])) for x, y in zip(xs, ys)]
+        matches.sort(key=lambda m: (-m[2], m[1], m[0]))
+        picked_px = []
+        min_dist = min(tw, th) * 1.5
+        portrait_dx = int(0.04 * self.xx)
+        portrait_dy = int(0.06 * self.yy)
+        for x, y, score in matches:
+            cx = rx1 + x + tw // 2 + portrait_dx
+            cy = ry1 + y + th // 2 + portrait_dy
+            if any((cx - px) ** 2 + (cy - py) ** 2 < min_dist ** 2 for px, py in picked_px):
+                continue
+            picked_px.append((cx, cy))
+            if len(picked_px) >= max_count:
+                break
+        picked_px.sort(key=lambda p: (p[1], p[0]))
+        points = [self._pixel_to_click(px, py) for px, py in picked_px[:max_count]]
+        if points:
+            CUS_LOGGER.info(f"识别到 {len(points)} 名星标角色")
+        return points
+
+    def click_team_order(self):
+        click_points = self.find_starred_roster_points(max_count=4)
+        for i in self.order:
+            if len(click_points) >= 4:
+                break
+            pt = self.roster_grid_point(i)
+            if any(self._near_click_point(pt, old) for old in click_points):
+                continue
+            click_points.append(pt)
+        click_points = click_points[:4]
+        CUS_LOGGER.info(f"备战选角，将依次选择 {len(click_points)} 名角色")
+        for x, y in click_points:
+            key_mouse_manager.click(x, y)
+            key_mouse_manager.sleep(0.35)
+            key_mouse_manager.wait()
+        self.get_screen()
+
     def pre_start(self):
         self.fail_count = 0
-        if self.check("team4", 0.5797, 0.2389):
-            dx = 0.9266 - 0.8552
-            dy = 0.8194 - 0.6741
-            for i in self.order:
-                key_mouse_manager.click(
-                    0.9266 - dx * ((i - 1) % 3), 0.8194 - dy * ((i - 1) // 3)
-                )
+        if not self.require_team4_check() or self.check("team4", 0.5797, 0.2389):
+            self.click_team_order()
+        key_mouse_manager.sleep(0.3)
         key_mouse_manager.click(0.1635, 0.1056)
+        key_mouse_manager.wait()
+    def click_fate_by_index(self, index, center=(0.4969, 0.3750)):
+        mask_img = find_image_by_name("mask_fate")
+        if mask_img is None:
+            CUS_LOGGER.warning("未找到 mask_fate，无法按索引选择命途")
+            return False
+        fate_count = len(config.fates)
+        shape = (
+            int(self.scx * mask_img.shape[0]),
+            int(self.scx * mask_img.shape[1]),
+        )
+        col_w = shape[1] / fate_count
+        offset = ((index + 0.5) * col_w - shape[1] // 2, 0)
+        key_mouse_manager.click(*self.calc_point(center, offset))
+        return True
+
     def select_fate(self):
         click_x = [0.02, 0.98]
         n = 4  # 重试次数
@@ -531,15 +617,21 @@ class SimulatedUniverse(UniverseUtils):
         while n:
             img = self.get_small_interaction_img(x=0.4969, y=0.3750, mask="mask_fate", fresh=True)
             res = self.ts.split_and_find([self.fate], img)
+            if res[1] >= 2 and n:
+                key_mouse_manager.click(*self.calc_point((0.4969, 0.3750), res[0]))
+                key_mouse_manager.sleep(0.3)
+                key_mouse_manager.wait()
+                return
             if res[1] == 1 and n:
                 # 没有找到命途
                 CUS_LOGGER.warning(f"未找到 {self.fate} 命途，尝试翻页")
                 key_mouse_manager.click(click_x[n % len(click_x)], 0.5)
                 n -= 1
+                key_mouse_manager.sleep(0.5)
+                key_mouse_manager.wait()
                 continue
-            else:
-                break
-        key_mouse_manager.click(*self.calc_point((0.4969, 0.3750), res[0]))
+            break
+        CUS_LOGGER.warning(f"OCR 未识别 {self.fate}，跳过点击避免误选第一个命途")
     def select_bless(self):
         if not (self.click_text('神奇宇宙') or self.click_text('巨胃宇宙')):
             key_mouse_manager.click(0.5, 0.5)
